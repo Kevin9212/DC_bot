@@ -429,24 +429,53 @@ async def set_active_title(guild_id: int, user_id: int, title: str | None):
             INSERT OR REPLACE INTO user_titles (guild_id, user_id, active_title)
             VALUES (?, ?, ?);
         """, (guild_id, user_id, title))
+
         await db.commit()
 
-async def get_active_title(guild_id: int, user_id: int):
+async def ensure_title_tables():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_titles (
-                guild_id INTEGER,
-                user_id INTEGER,
-                active_title TEXT,
+            CREATE TABLE IF NOT EXISTS active_titles (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                item_id TEXT NOT NULL,
                 PRIMARY KEY (guild_id, user_id)
             );
         """)
+        await db.commit()
+
+
+async def set_active_title(guild_id: int, user_id: int, item_id: str):
+    """設定使用者目前佩戴的稱號（item_id 例如 title_001）"""
+    await ensure_title_tables()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO active_titles (guild_id, user_id, item_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, user_id)
+            DO UPDATE SET item_id=excluded.item_id;
+        """, (guild_id, user_id, item_id))
+        await db.commit()
+
+
+async def get_active_title(guild_id: int, user_id: int):
+    """
+    回傳使用者目前佩戴稱號的「名稱」(shop_items.name)；
+    若找不到就回傳 None
+    """
+    await ensure_title_tables()
+    async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
-            SELECT active_title FROM user_titles
-            WHERE guild_id=? AND user_id=?;
+            SELECT s.name
+            FROM active_titles a
+            JOIN shop_items s
+              ON s.guild_id=a.guild_id AND s.item_id=a.item_id
+            WHERE a.guild_id=? AND a.user_id=?;
         """, (guild_id, user_id))
         row = await cur.fetchone()
         return row[0] if row else None
+
+
 
 async def list_owned_titles(guild_id: int, user_id: int):
     """

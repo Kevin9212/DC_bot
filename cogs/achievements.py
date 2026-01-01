@@ -10,6 +10,7 @@ from db import (
     get_message_count,
     get_level,
     get_streak,
+    set_active_title,
 )
 
 # 你可以在這裡定義成就規格（code 必須唯一）
@@ -77,6 +78,14 @@ class Achievements(commands.Cog):
             unlocked, ach = await unlock_achievement(guild_id, user_id, code)
             if unlocked and ach:
                 unlocked_any = True
+
+                # ach = (code, name, description, reward_item_id)
+                reward_item_id = ach[3]
+
+                # ✅ 自動佩戴：只對稱號道具生效（title_ 開頭）
+                if reward_item_id and reward_item_id.startswith("title_"):
+                    await set_active_title(guild_id, user_id, reward_item_id)
+
                 # 公告（可選）
                 if announce_channel:
                     embed = discord.Embed(
@@ -84,10 +93,12 @@ class Achievements(commands.Cog):
                         description=f"恭喜 <@{user_id}> 解鎖 **{ach[1]}**\n{ach[2]}",
                         color=discord.Color.gold()
                     )
-                    if ach[3]:
-                        embed.add_field(name="獎勵", value=f"已獲得稱號道具：`{ach[3]}`（到 /shop inventory 查看）", inline=False)
+                    if reward_item_id:
+                        msg = f"已獲得稱號道具：`{reward_item_id}`"
+                        if reward_item_id.startswith("title_"):
+                            msg += "\n✅ 已自動佩戴該稱號"
+                        embed.add_field(name="獎勵", value=msg, inline=False)
                     await announce_channel.send(embed=embed)
-
         return unlocked_any
 
 
