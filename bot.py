@@ -13,7 +13,7 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.messages = True
-intents.message_content = False  # Slash 為主，不需要開
+intents.message_content = True  # on_message 統計/經驗需要
 
 class XiaoPiYanBot(commands.Bot):
     async def setup_hook(self):
@@ -47,12 +47,16 @@ async def on_ready():
     print("我目前加入的伺服器：")
     for g in bot.guilds:
         print(f"- {g.name} ({g.id})")
+    title_items = [
+        ("title_001", "夜貓子", 500, "凌晨還在聊天的專屬稱號"),
+        ("title_002", "話匣子", 0, "成就獎勵稱號"),
+        ("title_003", "社群常客", 0, "成就獎勵稱號"),
+        ("title_004", "新手冒險者", 0, "成就獎勵稱號"),
+        ("title_005", "資深玩家", 0, "成就獎勵稱號"),
+        ("title_006", "三日不墜", 0, "成就獎勵稱號"),
+        ("title_007", "打卡達人", 0, "成就獎勵稱號"),
+    ]
     for guild in bot.guilds:
-        await add_shop_item(
-            guild.id,
-            "title_001",
-            "夜貓子",
-            500,
-            "凌晨還在聊天的專屬稱號"
-        )
+        for item_id, name, price, desc in title_items:
+            await add_shop_item(guild.id, item_id, name, price, desc)
 bot.run(TOKEN)

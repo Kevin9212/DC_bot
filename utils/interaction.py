@@ -32,20 +32,18 @@ async def reply(
     - 若已 defer/回覆過：用 followup.send
     """
     try:
+        kwargs = {
+            "content": content,
+            "ephemeral": ephemeral,
+        }
+        if embed is not None:
+            kwargs["embed"] = embed
+        if embeds is not None:
+            kwargs["embeds"] = embeds
+
         if not interaction.response.is_done():
-            return await interaction.response.send_message(
-                content=content,
-                embed=embed,
-                embeds=embeds,
-                ephemeral=ephemeral
-            )
-        else:
-            return await interaction.followup.send(
-                content=content,
-                embed=embed,
-                embeds=embeds,
-                ephemeral=ephemeral
-            )
+            return await interaction.response.send_message(**kwargs)
+        return await interaction.followup.send(**kwargs)
     except discord.NotFound:
         # interaction 已過期就忽略（避免噴 log 洗版）
         return None

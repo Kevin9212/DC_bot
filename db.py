@@ -412,26 +412,6 @@ async def get_profile_data(guild_id: int, user_id: int):
 # 稱號系統
 # =====================================================
 
-async def set_active_title(guild_id: int, user_id: int, title: str | None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?);
-        """, (guild_id,))
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_titles (
-                guild_id INTEGER,
-                user_id INTEGER,
-                active_title TEXT,
-                PRIMARY KEY (guild_id, user_id)
-            );
-        """)
-        await db.execute("""
-            INSERT OR REPLACE INTO user_titles (guild_id, user_id, active_title)
-            VALUES (?, ?, ?);
-        """, (guild_id, user_id, title))
-
-        await db.commit()
-
 async def ensure_title_tables():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -444,11 +424,17 @@ async def ensure_title_tables():
         """)
         await db.commit()
 
-
-async def set_active_title(guild_id: int, user_id: int, item_id: str):
+async def set_active_title(guild_id: int, user_id: int, item_id: str | None):
     """設定使用者目前佩戴的稱號（item_id 例如 title_001）"""
     await ensure_title_tables()
     async with aiosqlite.connect(DB_PATH) as db:
+        if item_id is None:
+            await db.execute("""
+                DELETE FROM active_titles
+                WHERE guild_id=? AND user_id=?;
+            """, (guild_id, user_id))
+            await db.commit()
+            return
         await db.execute("""
             INSERT INTO active_titles (guild_id, user_id, item_id)
             VALUES (?, ?, ?)
@@ -458,7 +444,19 @@ async def set_active_title(guild_id: int, user_id: int, item_id: str):
         await db.commit()
 
 
-async def get_active_title(guild_id: int, user_id: int):
+async def get_active_title_item_id(guild_id: int, user_id: int) -> str | None:
+    await ensure_title_tables()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            SELECT item_id
+            FROM active_titles
+            WHERE guild_id=? AND user_id=?;
+        """, (guild_id, user_id))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+
+async def get_active_title(guild_id: int, user_id: int) -> str | None:
     """
     回傳使用者目前佩戴稱號的「名稱」(shop_items.name)；
     若找不到就回傳 None
@@ -483,7 +481,7 @@ async def list_owned_titles(guild_id: int, user_id: int):
     """
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
-            SELECT s.name
+            SELECT s.item_id, s.name
             FROM inventory i
             JOIN shop_items s
               ON s.guild_id=i.guild_id AND s.item_id=i.item_id
@@ -492,7 +490,7 @@ async def list_owned_titles(guild_id: int, user_id: int):
             ORDER BY s.name ASC;
         """, (guild_id, user_id))
         rows = await cur.fetchall()
-        return [r[0] for r in rows]
+        return [(r[0], r[1]) for r in rows]
 # =====================================================
 # 商店系統
 # =====================================================

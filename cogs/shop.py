@@ -2,6 +2,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils.interaction import auto_defer, reply
+
 from db import (
     list_shop,
     buy_item,
@@ -18,23 +20,15 @@ class Shop(commands.Cog):
         self.bot = bot
 
 
-@shop.command(
-    name="list",
-    description="查看目前商店販售的商品"
-)
+@shop.command(name="list", description="查看目前商店販售的商品")
+@auto_defer(ephemeral=True)
 async def shop_list(interaction: discord.Interaction):
     items = await list_shop(interaction.guild_id)
 
     if not items:
-        return await interaction.response.send_message(
-            "商店目前沒有商品。",
-            ephemeral=True
-        )
+        return await reply(interaction, "商店目前沒有商品。", ephemeral=True)
 
-    embed = discord.Embed(
-        title="🛒 商店商品列表",
-        color=discord.Color.green()
-    )
+    embed = discord.Embed(title="🛒 商店商品列表", color=discord.Color.green())
 
     for item_id, name, price, desc in items:
         embed.add_field(
@@ -43,13 +37,10 @@ async def shop_list(interaction: discord.Interaction):
             inline=False
         )
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await reply(interaction, embed=embed, ephemeral=True)
 
 
-@shop.command(
-    name="buy",
-    description="購買商店商品"
-)
+@shop.command(name="buy", description="購買商店商品")
 @app_commands.describe(
     item_id="商品 ID（例如 title_001）",
     qty="購買數量（預設 1）"
@@ -69,15 +60,13 @@ async def shop_buy(
     )
 
     if not ok:
-        return await interaction.followup.send(msg, ephemeral=True)
+        return await reply(interaction, msg, ephemeral=True)
 
-    await interaction.followup.send(f"✅ {msg}", ephemeral=True)
+    await reply(interaction, f"✅ {msg}", ephemeral=True)
 
 
-@shop.command(
-    name="inventory",
-    description="查看你的背包"
-)
+@shop.command(name="inventory", description="查看你的背包")
+@auto_defer(ephemeral=True)
 async def inventory(interaction: discord.Interaction):
     items = await list_inventory(
         interaction.guild_id,
@@ -85,10 +74,7 @@ async def inventory(interaction: discord.Interaction):
     )
 
     if not items:
-        return await interaction.response.send_message(
-            "你的背包是空的。",
-            ephemeral=True
-        )
+        return await reply(interaction, "你的背包是空的。", ephemeral=True)
 
     embed = discord.Embed(
         title="🎒 你的背包",
@@ -102,7 +88,7 @@ async def inventory(interaction: discord.Interaction):
             inline=False
         )
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await reply(interaction, embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

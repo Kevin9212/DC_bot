@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from utils.interaction import auto_defer, reply
 
 from db import (
     upsert_achievement,
@@ -104,9 +105,9 @@ class Achievements(commands.Cog):
 
     # Slash 指令：查看自己的成就
     @app_commands.command(name="achievements", description="查看你的成就解鎖狀態")
+    @auto_defer(ephemeral=True)
     async def achievements(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
+        
         gid = interaction.guild_id
         uid = interaction.user.id
 
@@ -127,9 +128,7 @@ class Achievements(commands.Cog):
                 value=f"`{code}`  {desc}{reward_text}",
                 inline=False
             )
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
+        await reply(interaction, embed=embed, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Achievements(bot))

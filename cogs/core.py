@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from utils.interaction import auto_defer, reply
 
 class Core(commands.Cog):
     """
@@ -16,15 +17,14 @@ class Core(commands.Cog):
         name="ping",
         description="測試小皮炎是否在線"
     )
+    @auto_defer(ephemeral=True)
     async def ping(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            "🏓 Pong！小皮炎在線中"
-        )
-
+        await reply(interaction, "🏓 Pong！小皮炎在線中", ephemeral=False)
     @app_commands.command(
         name="help",
         description="顯示小皮炎的指令列表"
     )
+    @auto_defer(ephemeral=True)
     async def help(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="📖 小皮炎指令列表",
@@ -52,10 +52,7 @@ class Core(commands.Cog):
             inline=False
         )
 
-        await interaction.response.send_message(
-            embed=embed,
-            ephemeral=True
-        )
+        await reply(interaction, embed=embed, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Core(bot))

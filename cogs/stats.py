@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from utils.interaction import auto_defer, reply
 from db import bump_message_stats, top_leaderboard, get_user_rank
 
 class Stats(commands.Cog):
@@ -34,14 +35,12 @@ class Stats(commands.Cog):
         name="leaderboard",
         description="查看伺服器訊息數排行榜（前 10 名）"
     )
+    @auto_defer(ephemeral=False)
     async def leaderboard(self, interaction: discord.Interaction):
         rows = await top_leaderboard(interaction.guild_id, limit=10)
 
         if not rows:
-            return await interaction.response.send_message(
-                "目前還沒有任何統計資料。",
-                ephemeral=True
-            )
+            return await reply(interaction, "目前還沒有任何統計資料。", ephemeral=False)
 
         embed = discord.Embed(
             title="📊 訊息數排行榜（Top 10）",
@@ -58,13 +57,14 @@ class Stats(commands.Cog):
             lines.append(f"{prefix} **{name}** — `{count}` 則")
 
         embed.description = "\n".join(lines)
-        await interaction.response.send_message(embed=embed)
+        await reply(interaction, embed=embed, ephemeral=False)
 
     # ===== /rank =====
     @app_commands.command(
         name="rank",
         description="查看你在訊息排行榜中的名次"
     )
+    @auto_defer(ephemeral=True)
     async def rank(self, interaction: discord.Interaction):
         result = await get_user_rank(
             interaction.guild_id,
@@ -72,13 +72,15 @@ class Stats(commands.Cog):
         )
 
         if not result:
-            return await interaction.response.send_message(
+            return await reply(
+                interaction,
                 "你目前還沒有被列入統計，多發幾則訊息試試吧！",
                 ephemeral=True
             )
 
         rank, count, total = result
-        await interaction.response.send_message(
+        await reply(
+            interaction,
             f"你的排名：**{rank}/{total}**\n"
             f"訊息數：`{count}` 則",
             ephemeral=True
