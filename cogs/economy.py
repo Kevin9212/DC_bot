@@ -1,0 +1,334 @@
+import discord
+from discord import app_commands
+from discord.ext import commands
+from datetime import datetime, timezone
+
+from db import (
+    utc_now_ts,
+    get_coins, add_coins,
+    get_checkin, update_checkin,
+    get_level_info, add_xp,
+    top_coins, top_levels,
+    can_transfer, transfer_coins,
+    get_profile_data, get_user_rank,
+    get_active_title
+)
+
+# ==============================
+# 安全 defer（防止 10062）
+# ==============================
+async def safe_defer(
+    interaction: discord.Interaction,
+    ephemeral: bool = True
+) -> bool:
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=ephemeral)
+        return True
+    except discord.NotFound:
+        # 10062 Unknown interaction
+        return False
+    except discord.InteractionResponded:
+        return True
+
+
+class Economy(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+# ===== 工具 =====
+
+def human_utc(ts: int) -> str:
+    if ts <= 0:
+        return "從未"
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+# ===== Group：/top =====
+
+top = app_commands.Group(
+    name="top",
+    description="排行榜相關指令"
+)
+
+@top.command(
+    name="coins",
+    description="查看金幣排行榜（前 10 名）"
+)
+async def top_coins_cmd(interaction: discord.Interaction):
+    rows = await top_coins(interaction.guild_id, limit=10)
+
+    if not rows:
+        return await interaction.response.send_message(
+            "目前還沒有金幣資料。",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="🪙 金幣排行榜（Top 10）",
+        color=discord.Color.gold()
+    )
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = []
+
+    for i, (user_id, coins) in enumerate(rows, start=1):
+        member = interaction.guild.get_member(user_id)
+        name = member.display_name if member else f"User({user_id})"
+        prefix = medals[i - 1] if i <= 3 else f"{i}."
+        lines.append(f"{prefix} **{name}** — `🪙 {coins}`")
+
+    embed.description = "\n".join(lines)
+    await interaction.response.send_message(embed=embed)
+
+@top.command(
+    name="levels",
+    description="查看等級排行榜（前 10 名）"
+)
+async def top_levels_cmd(interaction: discord.Interaction):
+    rows = await top_levels(interaction.guild_id, limit=10)
+
+    if not rows:
+        return await interaction.response.send_message(
+            "目前還沒有等級資料。",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="🎖️ 等級排行榜（Top 10）",
+        color=discord.Color.purple()
+    )
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = []
+
+    for i, (user_id, level, xp) in enumerate(rows, start=1):
+        member = interaction.guild.get_member(user_id)
+        name = member.display_name if member else f"User({user_id})"
+        prefix = medals[i - 1] if i <= 3 else f"{i}."
+        lines.append(f"{prefix} **{name}** — **Lv.{level}**（XP `{xp}`）")
+
+    embed.description = "\n".join(lines)
+    await interaction.response.send_message(embed=embed)
+
+
+
+
+# ===== Cog =====
+class Economy(commands.Cog):
+    """
+    Phase 2 / 3：經濟系統
+    - XP / 等級（自動）
+    - /daily
+    - /coins
+    - /level
+    - /give
+    """
+
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    # ===== 事件：每則訊息給 XP =====
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if not message.guild or message.author.bot:
+            return
+
+        did_gain, xp, lvl, leveled = await add_xp(
+            message.guild.id,
+            message.author.id,
+            amount=15,
+            cooldown_sec=60
+        )
+
+        if did_gain and leveled:
+            try:
+                await message.channel.send(
+                    f"🎉 {message.author.mention} 升到 **Lv.{lvl}** 了！"
+                )
+            except Exception:
+                pass
+        # ===== 成就檢查（發言 / 等級類）=====
+        ach_cog = self.bot.get_cog("Achievements")
+        if ach_cog:
+            await ach_cog.check_and_unlock(
+                message.guild.id,
+                message.author.id,
+                announce_channel=None  # None = 不公告頻道，避免洗版
+            )
+
+    # ===== /daily =====
+    @app_commands.command(
+        name="daily",
+        description="每日簽到領取金幣（含連續簽到加成）"
+    )
+    async def daily(self, interaction: discord.Interaction):
+        # ✅ 先回應，避免 interaction 過期
+        if not await safe_defer(interaction, ephemeral=True):
+            return
+        gid = interaction.guild_id
+        uid = interaction.user.id
+
+        now = utc_now_ts()
+        last_ts, streak = await get_checkin(gid, uid)
+
+        if last_ts > 0 and (now - last_ts) < 24 * 3600:
+            remain = 24 * 3600 - (now - last_ts)
+            await interaction.followup.send(
+                f"你今天已簽到過了。\n"
+                f"上次簽到：{human_utc(last_ts)}\n"
+                f"剩餘冷卻：約 {remain // 3600} 小時 {(remain % 3600) // 60} 分鐘",
+                ephemeral=True
+            )
+            return
+
+        streak = streak + 1 if last_ts > 0 and (now - last_ts) <= 48 * 3600 else 1
+        reward = 100 + min(200, (streak - 1) * 20)
+
+        await update_checkin(gid, uid, now, streak)
+        coins = await add_coins(gid, uid, reward)
+
+        # ===== 成就檢查（連續簽到類）=====
+        ach_cog = self.bot.get_cog("Achievements")
+        if ach_cog:
+            await ach_cog.check_and_unlock(interaction.guild_id,interaction.user.id,announce_channel=interaction.channel)  # 想公告就用 channel，不想就 None
+        embed = discord.Embed(
+            title="✅ 每日簽到成功",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="獲得金幣", value=f"`+{reward}`", inline=True)
+        embed.add_field(name="連續簽到", value=f"`{streak} 天`", inline=True)
+        embed.add_field(name="目前餘額", value=f"`🪙 {coins}`", inline=True)
+
+        # ✅ 用 followup.send
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ===== /profile =====
+    @app_commands.command(
+        name="profile",
+        description="查看你的個人資料（等級 / 金幣 / 排名）"
+    )
+    async def profile(self, interaction: discord.Interaction):
+        gid = interaction.guild_id
+        uid = interaction.user.id
+
+        data = await get_profile_data(gid, uid)
+        rank_info = await get_user_rank(gid, uid)
+
+        rank_text = "未上榜"
+        if rank_info:
+            rank, _, total = rank_info
+            rank_text = f"{rank} / {total}"
+
+        embed = discord.Embed(
+            title=f"👤 {interaction.user.display_name} 的個人資料",
+            color=discord.Color.blurple()
+        )
+
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
+        embed.add_field(name="🎖️ 等級", value=f"Lv. {data['level']}", inline=True)
+        embed.add_field(name="✨ XP", value=str(data["xp"]), inline=True)
+        embed.add_field(name="🪙 金幣", value=str(data["coins"]), inline=True)
+        embed.add_field(name="💬 訊息數", value=str(data["messages"]), inline=True)
+        embed.add_field(name="🏆 訊息排行", value=rank_text, inline=True)
+        
+        active_title = await get_active_title(gid, uid) or "無"
+        embed.add_field(name="🏷️ 稱號",value=active_title, inline=True)
+        
+        embed.set_footer(text="小皮炎 • Profile")
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
+    # ===== /coins =====
+    @app_commands.command(
+        name="coins",
+        description="查看你目前擁有的金幣"
+    )
+    async def coins(self, interaction: discord.Interaction):
+        coins = await get_coins(
+            interaction.guild_id,
+            interaction.user.id
+        )
+        await interaction.response.send_message(
+            f"你目前有 `🪙 {coins}` 金幣。",
+            ephemeral=True
+        )
+
+    # ===== /level =====
+    @app_commands.command(
+        name="level",
+        description="查看你的等級與 XP"
+    )
+    async def level(self, interaction: discord.Interaction):
+        xp, lvl, last_ts = await get_level_info(
+            interaction.guild_id,
+            interaction.user.id
+        )
+        await interaction.response.send_message(
+            f"等級：**Lv.{lvl}**\n"
+            f"XP：`{xp}`\n"
+            f"上次獲得 XP：{human_utc(last_ts)}",
+            ephemeral=True
+        )
+
+    
+    # ===== /give =====
+    @app_commands.command(
+        name="give",
+        description="轉帳金幣給其他成員（含手續費）"
+    )
+    @app_commands.describe(
+        member="接收金幣的成員",
+        amount="轉帳金額"
+    )
+    async def give(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount: int
+    ):
+        if member.bot:
+            return await interaction.response.send_message(
+                "不能轉帳給機器人。",
+                ephemeral=True
+            )
+
+        ok, remain = await can_transfer(
+            interaction.guild_id,
+            interaction.user.id,
+            cooldown_sec=60
+        )
+        if not ok:
+            return await interaction.response.send_message(
+                f"轉帳冷卻中，請再等 {remain} 秒。",
+                ephemeral=True
+            )
+
+        success, msg = await transfer_coins(
+            interaction.guild_id,
+            interaction.user.id,
+            member.id,
+            amount
+        )
+
+        if not success:
+            return await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+
+        await interaction.response.send_message(
+            f"💸 {interaction.user.mention} → {member.mention}\n{msg}"
+        )
+
+# ===== setup =====
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Economy(bot))
+
+    # 安全註冊 group（避免重複）
+    if bot.tree.get_command("top") is None:
+        bot.tree.add_command(top)
+
+
