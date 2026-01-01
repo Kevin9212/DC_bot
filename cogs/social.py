@@ -17,7 +17,6 @@ goodbye = app_commands.Group(
 )
 
 # ===== Helper =====
-
 def render_template(template: str, member: discord.Member) -> str:
     """
     可用變數：
@@ -25,9 +24,45 @@ def render_template(template: str, member: discord.Member) -> str:
     {guild}          -> 伺服器名稱
     {member_count}   -> 目前人數
     """
+    member_count = member.guild.member_count
+    if member_count is None:
+        member_count = len(member.guild.members)
+
     return (
         (template or "")
-@@ -56,136 +57,140 @@ class Social(commands.Cog):
+        .replace("{user}", member.mention)
+        .replace("{guild}", member.guild.name)
+        .replace("{member_count}", str(member_count))
+    )
+
+
+class Social(commands.Cog):
+    """
+    Phase 0 / Social
+    - 進/退場訊息
+    - /welcome
+    - /goodbye
+    """
+
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    # ---------- 事件：成員加入 ----------
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        settings = await get_guild_settings(member.guild.id)
+        channel_id = settings.get("welcome_channel_id")
+        if not channel_id:
+            return
+
+        channel = member.guild.get_channel(channel_id)
+        if not channel:
+            return
+
+        template = settings.get("welcome_message") or \
+            "{user} 歡迎加入 {guild}！目前人數：{member_count}"
+
+        await channel.send(render_template(template, member))
 
     # ---------- 事件：成員離開 ----------
     @commands.Cog.listener()
